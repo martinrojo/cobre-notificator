@@ -24,7 +24,11 @@ context: |
     Por ahora recibe el header X-Client-Id y lo propaga; JWT y rate-limiting
     quedan para el final (el client_id saldrá del JWT). Se implementa al último.
   - manager: API self-service. Arquitectura hexagonal. Usuario de DB con SELECT
-    solo sobre notification_event. Publica replays en Kafka.
+    solo sobre notification_event. Publica replays en Kafka. Identifica al
+    cliente con un servlet Filter protegido por defecto (lista explícita de
+    rutas públicas), nunca con aspectos ni anotaciones opt-in. Por ahora el
+    filtro lee X-Client-Id; al final se reemplaza por validación de JWT.
+  - JWT: se valida tanto en el gateway como en el manager (defensa en profundidad).
   - notificator: consume Kafka, valida suscripción, entrega sync al webhook,
     reintenta. Arquitectura hexagonal. Dueño del esquema y único que escribe
     notification_event. Solo lee subscription (nunca escribe).
@@ -69,6 +73,9 @@ context: |
   - Handler de cada DLT: consume el evento y lo marca FAILED.
 
   ## Convenciones Java
+  - Todo proyecto Java (pom.xml) incluye com.spotify.fmt:fmt-maven-plugin
+    (Google Java Format) con el goal check; el build falla si el código no está
+    formateado.
   - Inmutabilidad: records para DTOs, comandos, eventos y modelos de dominio.
   - Inyección por constructor únicamente (sin @Autowired en campos).
   - Excepciones con static factory methods (p.ej. NotificationEventNotFoundException.of(id)).
