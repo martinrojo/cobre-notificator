@@ -2,7 +2,7 @@
 # Creates one DB user per application with least-privilege grants.
 # Sourced by the MariaDB entrypoint (keep it NON-executable so docker_process_sql is available).
 # Passwords come from the environment, never from the repo.
-set -euo pipefail
+# No `set -e/-u` here: a sourced script would leak it into the entrypoint and break later init scripts.
 
 : "${MARIADB_DATABASE:?MARIADB_DATABASE is required}"
 : "${NOTIFICATOR_DB_USER:?NOTIFICATOR_DB_USER is required}"
