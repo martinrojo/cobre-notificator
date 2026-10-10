@@ -19,6 +19,7 @@ CREATE TABLE notification_event (
     attempts         INT           NOT NULL DEFAULT 0,
     created_at       DATETIME(3)   NOT NULL,
     last_attempt_at  DATETIME(3)   NULL,
+    last_replay_at   DATETIME(3)   NULL,
     delivery_url     VARCHAR(2048) NULL,
     last_http_status SMALLINT      NULL,
     last_error       VARCHAR(500)  NULL,

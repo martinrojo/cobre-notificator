@@ -7,9 +7,37 @@ spring:
     password: ${DB_PASSWORD}
   jackson:
     property-naming-strategy: SNAKE_CASE
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        # Bounds how long send() blocks a request thread on metadata/buffer when Kafka is down.
+        max.block.ms: ${KAFKA_MAX_BLOCK_MS:1000}
+        request.timeout.ms: 2000
+        # Must be >= request.timeout.ms + linger.ms; stop retrying around when the request gives up.
+        delivery.timeout.ms: 3000
+
+manager:
+  replay:
+    topic: notifications.replay-requested.v1
+    publish-timeout: ${REPLAY_PUBLISH_TIMEOUT:3s}
+    retry-after: ${REPLAY_RETRY_AFTER:5s}
 
 server:
   port: 9290
+
+# Separate port, not published by compose nor routed by the gateway; the client filter does not apply here.
+management:
+  server:
+    port: 9291
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
 
 logging:
   structured:

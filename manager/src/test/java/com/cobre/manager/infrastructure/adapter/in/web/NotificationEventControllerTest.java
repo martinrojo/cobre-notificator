@@ -1,20 +1,26 @@
 package com.cobre.manager.infrastructure.adapter.in.web;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.cobre.manager.domain.exception.NotificationEventNotFoundException;
+import com.cobre.manager.domain.exception.ReplayNotAllowedException;
+import com.cobre.manager.domain.exception.ReplayPublishException;
 import com.cobre.manager.domain.model.DeliveryStatus;
 import com.cobre.manager.domain.model.NotificationEvent;
 import com.cobre.manager.domain.model.NotificationEventFilter;
 import com.cobre.manager.domain.port.in.GetNotificationEventUseCase;
 import com.cobre.manager.domain.port.in.ListNotificationEventsUseCase;
+import com.cobre.manager.domain.port.in.ReplayNotificationEventUseCase;
 import com.cobre.manager.infrastructure.adapter.in.web.security.ClientContext;
 import java.time.Instant;
 import java.util.List;
@@ -38,6 +44,8 @@ class NotificationEventControllerTest {
 
   @MockitoBean private GetNotificationEventUseCase getNotificationEvent;
 
+  @MockitoBean private ReplayNotificationEventUseCase replayNotificationEvent;
+
   @Test
   void returnsEventsInSnakeCase() throws Exception {
     when(listNotificationEvents.list(any()))
@@ -50,7 +58,8 @@ class NotificationEventControllerTest {
                     "Credit card payment received for $150.00",
                     DeliveryStatus.DELIVERED,
                     Instant.parse("2024-03-15T09:30:22Z"),
-                    Instant.parse("2024-03-15T09:30:22Z"))));
+                    Instant.parse("2024-03-15T09:30:22Z"),
+                    null)));
 
     mockMvc
         .perform(get("/notification_events").header(CLIENT_HEADER, "CLIENT001"))
@@ -176,7 +185,8 @@ class NotificationEventControllerTest {
                 "Bank transfer received from Account #4567 for $1,500.00",
                 DeliveryStatus.FAILED,
                 Instant.parse("2024-03-15T11:20:18Z"),
-                Instant.parse("2024-03-15T11:20:18Z")));
+                Instant.parse("2024-03-15T11:20:18Z"),
+                null));
 
     mockMvc
         .perform(get("/notification_events/EVT003").header(CLIENT_HEADER, "CLIENT002"))
@@ -205,5 +215,65 @@ class NotificationEventControllerTest {
   void getByIdRequiresClient() throws Exception {
     mockMvc.perform(get("/notification_events/EVT001")).andExpect(status().isUnauthorized());
     verify(getNotificationEvent, never()).get(any(), any());
+  }
+
+  @Test
+  void replayReturns202WithoutBody() throws Exception {
+    mockMvc
+        .perform(post("/notification_events/EVT003/replay").header(CLIENT_HEADER, "CLIENT002"))
+        .andExpect(status().isAccepted())
+        .andExpect(content().string(""));
+    verify(replayNotificationEvent).replay("CLIENT002", "EVT003");
+  }
+
+  @Test
+  void replayReturnsSame404AsGet() throws Exception {
+    doThrow(NotificationEventNotFoundException.of("EVT003"))
+        .when(replayNotificationEvent)
+        .replay("CLIENT001", "EVT003");
+
+    mockMvc
+        .perform(post("/notification_events/EVT003/replay").header(CLIENT_HEADER, "CLIENT001"))
+        .andExpect(status().isNotFound())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.title").value("Not Found"))
+        .andExpect(jsonPath("$.detail").value("Notification event not found"));
+  }
+
+  @Test
+  void replayReturns409WhenNotAllowed() throws Exception {
+    doThrow(ReplayNotAllowedException.of("EVT001", DeliveryStatus.DELIVERED))
+        .when(replayNotificationEvent)
+        .replay("CLIENT001", "EVT001");
+
+    mockMvc
+        .perform(post("/notification_events/EVT001/replay").header(CLIENT_HEADER, "CLIENT001"))
+        .andExpect(status().isConflict())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(
+            jsonPath("$.detail")
+                .value("Notification event cannot be replayed in status DELIVERED"));
+  }
+
+  @Test
+  void replayReturns503WithRetryAfterWhenPublishFails() throws Exception {
+    doThrow(ReplayPublishException.of("EVT003", new RuntimeException("broker kafka:9092 down")))
+        .when(replayNotificationEvent)
+        .replay("CLIENT002", "EVT003");
+
+    mockMvc
+        .perform(post("/notification_events/EVT003/replay").header(CLIENT_HEADER, "CLIENT002"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(header().string("Retry-After", "5"))
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.detail").value("Replay could not be requested, try again later"));
+  }
+
+  @Test
+  void replayRequiresClient() throws Exception {
+    mockMvc
+        .perform(post("/notification_events/EVT003/replay"))
+        .andExpect(status().isUnauthorized());
+    verify(replayNotificationEvent, never()).replay(any(), any());
   }
 }

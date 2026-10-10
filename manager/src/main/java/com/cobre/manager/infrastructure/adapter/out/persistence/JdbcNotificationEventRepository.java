@@ -19,7 +19,8 @@ public class JdbcNotificationEventRepository implements NotificationEventReposit
 
   private static final String SELECT =
       """
-      SELECT event_id, client_id, event_type, content, delivery_status, created_at, last_attempt_at
+      SELECT event_id, client_id, event_type, content, delivery_status, created_at, last_attempt_at,
+             last_replay_at
       FROM notification_event
       """;
 
@@ -47,7 +48,8 @@ public class JdbcNotificationEventRepository implements NotificationEventReposit
               rs.getString("content"),
               DeliveryStatus.valueOf(rs.getString("delivery_status")),
               toInstant(rs.getObject("created_at", LocalDateTime.class)),
-              toInstant(rs.getObject("last_attempt_at", LocalDateTime.class)));
+              toInstant(rs.getObject("last_attempt_at", LocalDateTime.class)),
+              toInstant(rs.getObject("last_replay_at", LocalDateTime.class)));
 
   private final JdbcClient jdbcClient;
 

@@ -33,6 +33,7 @@ class NotificationEventQueryServiceTest {
             "irrelevant",
             DeliveryStatus.FAILED,
             Instant.parse("2024-03-15T09:30:22Z"),
+            null,
             null);
     when(repository.findAll(filter)).thenReturn(List.of(event));
 
@@ -50,6 +51,7 @@ class NotificationEventQueryServiceTest {
             "irrelevant",
             DeliveryStatus.FAILED,
             Instant.parse("2024-03-15T11:20:18Z"),
+            null,
             null);
     when(repository.findById("CLIENT002", "EVT003")).thenReturn(Optional.of(event));
 

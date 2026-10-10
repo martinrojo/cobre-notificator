@@ -52,16 +52,24 @@ context: |
     -> 400 con mensaje de error específico. Sin resultados -> 200 con lista vacía.
   - GET /notification_events/{notification_event_id}: 404 si no existe o si
     pertenece a otro cliente (no distinguir ambos casos).
-  - POST /notification_events/{notification_event_id}/replay: solo si el estado es
-    FAILED (reintentos agotados); publica en notification-replay -> 202 Accepted.
-    409 si el evento existe pero no está FAILED; 404 si no existe o es de otro
-    cliente. El manager no cambia el estado (no escribe en la DB).
+  - POST /notification_events/{notification_event_id}/replay: FAILED -> publica ReplayRequested
+    (event_id, client_id, requested_at) en notifications.replay-requested.v1 y
+    responde 202 solo con el ack de Kafka (falla o timeout -> 503 con Retry-After).
+    PENDING/RETRYING con last_replay_at no nulo (replay en curso) -> 202 sin publicar.
+    Otro estado -> 409; no existe o es de otro cliente -> 404. El manager no
+    cambia el estado (no escribe en la DB); la idempotencia es del notificator.
 
   ## Notificator y Kafka
-  - Tópicos principales: notification y notification-replay. Cada uno tiene sus
-    propios retry topics y DLT (sufijos -retries-* y -failed de @RetryableTopic):
-    notification-retries-*, notification-failed, notification-replay-retries-*,
-    notification-replay-failed.
+  - Tópicos (3 particiones, creados por kafka/create-topics.sh vía kafka-init;
+    auto-creación deshabilitada en el broker):
+    transactions.events.v1 (principal, lo produce la plataforma; 7 días),
+    notificator.retry.v1-0..2 (1 día),
+    notificator.dlt.v1 (14 días),
+    notifications.replay-requested.v1 (replays del manager; 7 días).
+  - Un solo set de retry/DLT, compartido por el flujo principal y el replay.
+    @RetryableTopic con un RetryTopicNamesProviderFactory propio que devuelve
+    notificator.retry.v1-<n> y notificator.dlt.v1 (los sufijos derivan del
+    tópico principal y no sirven), y autoCreateTopics="false".
   - Key de los mensajes: client_id.
   - Idempotente por event_id: un evento en estado final no se reentrega, salvo
     replay de un FAILED (transición condicional en DB para descartar replays duplicados).
@@ -70,7 +78,7 @@ context: |
   - Se reintenta solo: timeout, error de conexión, HTTP 408, 429 y 5xx. El resto
     de errores no se reintenta.
   - La URL del webhook se resuelve desde subscription en cada intento.
-  - Handler de cada DLT: consume el evento y lo marca FAILED.
+  - Handler del DLT: consume el evento y lo marca FAILED.
 
   ## Convenciones Java
   - Todo proyecto Java (pom.xml) incluye com.spotify.fmt:fmt-maven-plugin
