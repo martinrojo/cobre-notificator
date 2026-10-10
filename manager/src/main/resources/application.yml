@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: manager
+  datasource:
+    url: jdbc:mariadb://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+server:
+  port: 9290
+
+logging:
+  structured:
+    format:
+      console: ecs

@@ -19,5 +19,18 @@ services:
       timeout: 5s
       retries: 5
 
+  manager:
+    build: ./manager
+    environment:
+      DB_HOST: mariadb
+      DB_NAME: ${MARIADB_DATABASE}
+      DB_USER: ${MANAGER_DB_USER}
+      DB_PASSWORD: ${MANAGER_DB_PASSWORD}
+    ports:
+      - "9290:9290"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
 volumes:
   mariadb-data:
