@@ -1,0 +1,121 @@
+schema: spec-driven
+
+context: |
+  ## Dominio
+  Caso técnico Cobre (Sr Software Engineer): entrega de notificaciones de eventos
+  vía webhook por cliente + API self-service para consultarlas y reenviarlas.
+  Datos de ejemplo: notification_events.json (sus estados "completed"/"failed"
+  se mapean a DELIVERED/FAILED al cargarlos como seed).
+  Requisitos del caso: validar suscripción antes de entregar (un cliente nunca
+  recibe eventos de otro), reintentos eficientes, persistir el resultado final,
+  observabilidad casi en tiempo real, y análisis de 3 riesgos OWASP Top 10.
+
+  ## Idioma
+  - Artefactos (proposal, design, specs, tasks, docs): español.
+  - Código, identificadores, nombres de tablas/columnas, mensajes de log: inglés.
+
+  ## Stack
+  Java 25, Spring Boot 4, Maven, Kafka (spring-kafka), MariaDB, JDBC (JdbcClient,
+  sin JPA), JUnit 5, Mockito, Micrometer + Prometheus, Grafana, Loki, Grafana Alloy,
+  Docker. No agregar dependencias fuera de este stack sin justificarlo en el design.
+
+  ## Aplicaciones
+  - gateway: único expuesto a internet, sin acceso a la DB. Rutea al manager.
+    Por ahora recibe el header X-Client-Id y lo propaga; JWT y rate-limiting
+    quedan para el final (el client_id saldrá del JWT). Se implementa al último.
+  - manager: API self-service. Arquitectura hexagonal. Usuario de DB con SELECT
+    solo sobre notification_event. Publica replays en Kafka.
+  - notificator: consume Kafka, valida suscripción, entrega sync al webhook,
+    reintenta. Arquitectura hexagonal. Dueño del esquema y único que escribe
+    notification_event. Solo lee subscription (nunca escribe).
+
+  ## Datos
+  - Una base, 2 tablas: subscription y notification_event.
+  - Estados de notification_event: PENDING, RETRYING, DELIVERED, FAILED, NOT_SUBSCRIBED.
+  - Migraciones manuales: scripts en notificator/db/ montados en
+    /docker-entrypoint-initdb.d de MariaDB, ejecutados en orden alfabético con
+    prefijo numérico (01-schema.sql, 02-users.sh, ...). Ninguna aplicación tiene
+    permisos DDL.
+  - Usuarios de DB (creados por 02-users.sh con credenciales de variables de entorno
+    NOTIFICATOR_DB_USER/PASSWORD y MANAGER_DB_USER/PASSWORD):
+    notificator (SELECT subscription; SELECT/INSERT/UPDATE notification_event),
+    manager (SELECT notification_event).
+
+  ## API del manager
+  - Toda consulta se filtra por el client_id recibido del gateway.
+  - GET /notification_events: filtros from, to (fecha de creación), delivery_status;
+    paginado. Tamaño de página máximo configurable por properties; si se supera
+    -> 400 con mensaje de error específico. Sin resultados -> 200 con lista vacía.
+  - GET /notification_events/{notification_event_id}: 404 si no existe o si
+    pertenece a otro cliente (no distinguir ambos casos).
+  - POST /notification_events/{notification_event_id}/replay: solo si el estado es
+    FAILED (reintentos agotados); publica en notification-replay -> 202 Accepted.
+    409 si el evento existe pero no está FAILED; 404 si no existe o es de otro
+    cliente. El manager no cambia el estado (no escribe en la DB).
+
+  ## Notificator y Kafka
+  - Tópicos principales: notification y notification-replay. Cada uno tiene sus
+    propios retry topics y DLT (sufijos -retries-* y -failed de @RetryableTopic):
+    notification-retries-*, notification-failed, notification-replay-retries-*,
+    notification-replay-failed.
+  - Key de los mensajes: client_id.
+  - Idempotente por event_id: un evento en estado final no se reentrega, salvo
+    replay de un FAILED (transición condicional en DB para descartar replays duplicados).
+  - Reintentos no bloqueantes con @RetryableTopic: delay 60s, multiplier 5,
+    attempts 4 (1 intento inicial + 3 reintentos a los 60s, 300s y 1500s).
+  - Se reintenta solo: timeout, error de conexión, HTTP 408, 429 y 5xx. El resto
+    de errores no se reintenta.
+  - La URL del webhook se resuelve desde subscription en cada intento.
+  - Handler de cada DLT: consume el evento y lo marca FAILED.
+
+  ## Convenciones Java
+  - Inmutabilidad: records para DTOs, comandos, eventos y modelos de dominio.
+  - Inyección por constructor únicamente (sin @Autowired en campos).
+  - Excepciones con static factory methods (p.ej. NotificationEventNotFoundException.of(id)).
+  - Dominio hexagonal sin dependencias de Spring, Kafka ni JDBC; los adapters
+    implementan los ports.
+
+  ## Docker
+  - Cada app tiene Dockerfile multi-stage que compila con Maven dentro de la imagen.
+  - docker-compose.yml en la raíz levanta apps + infraestructura (Kafka, MariaDB,
+    Prometheus, Grafana, Loki, Alloy).
+
+  ## Secretos
+  - Ningún secreto en código, application.yml ni repo. Credenciales por variables
+    de entorno (${DB_PASSWORD}, etc.).
+  - Local: .env en la raíz (en .gitignore) + .env.example commiteado con claves y
+    valores de ejemplo.
+  - Producción: secret manager (Vault o el de la nube); solo documentado.
+
+  ## Logs y observabilidad
+  - Logs JSON estructurados a stdout (logging estructurado nativo de Spring Boot).
+  - Alloy lee logs de los contenedores y los envía a Loki con labels app y level.
+    client_id y event_id son campos del JSON, nunca labels.
+  - Niveles: ERROR = evento al DLT, fallo inesperado, o intento de entrega fallido
+    que se va a reintentar. INFO = solo transiciones relevantes (DELIVERED, FAILED,
+    replay solicitado). DEBUG = detalle técnico (requests, respuestas, diagnóstico).
+    No usar INFO indiscriminadamente.
+  - Nunca loguear el campo content de los eventos (datos financieros).
+  - Métricas Micrometer -> Prometheus: entregas por resultado y cliente, mensajes
+    en DLT, latencia del webhook. Dashboard en Grafana (provisionado como código).
+
+rules:
+  proposal:
+    - Indicar qué aplicaciones (gateway, manager, notificator) toca el cambio
+    - Declarar explícitamente qué queda fuera de alcance
+  design:
+    - Respetar los límites de permisos de DB por aplicación; cualquier cambio de esquema va como script en notificator/db/
+    - Justificar cada dependencia nueva fuera del stack definido
+    - Si hay impacto de seguridad, relacionarlo con el OWASP Top 10
+  specs:
+    - Escenarios en formato GIVEN/WHEN/THEN con códigos HTTP y estados de evento concretos
+    - Cubrir siempre el aislamiento por client_id
+  tasks:
+    - Cada tarea con lógica no trivial incluye su test (JUnit 5 + Mockito)
+    - Incluir tareas de métricas y logs cuando el cambio agregue flujos nuevos
+
+operations:
+  apply:
+    guidance:
+      - Verificar con mvn test en la app afectada antes de marcar una tarea como completa
+      - No loguear content ni secretos, ni siquiera en DEBUG

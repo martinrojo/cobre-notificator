@@ -1,0 +1,23 @@
+services:
+  mariadb:
+    image: mariadb:12.3.3
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      NOTIFICATOR_DB_USER: ${NOTIFICATOR_DB_USER}
+      NOTIFICATOR_DB_PASSWORD: ${NOTIFICATOR_DB_PASSWORD}
+      MANAGER_DB_USER: ${MANAGER_DB_USER}
+      MANAGER_DB_PASSWORD: ${MANAGER_DB_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./notificator/db:/docker-entrypoint-initdb.d:ro
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mariadb-data:
