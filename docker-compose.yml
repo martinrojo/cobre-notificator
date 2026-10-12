@@ -58,6 +58,17 @@ services:
         condition: service_healthy
     restart: "no"
 
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.2.0
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "127.0.0.1:${KAFKA_UI_PORT:-8080}:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   manager:
     build: ./manager
     environment:
@@ -74,6 +85,100 @@ services:
       kafka-init:
         condition: service_completed_successfully
 
+  notificator:
+    build: ./notificator
+    environment:
+      DB_HOST: mariadb
+      DB_NAME: ${MARIADB_DATABASE}
+      DB_USER: ${NOTIFICATOR_DB_USER}
+      DB_PASSWORD: ${NOTIFICATOR_DB_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      WEBHOOK_CONNECT_TIMEOUT: ${WEBHOOK_CONNECT_TIMEOUT:-250ms}
+      WEBHOOK_READ_TIMEOUT: ${WEBHOOK_READ_TIMEOUT:-500ms}
+      # First retry delay (then x5, x25); lower it only to watch retries live.
+      RETRY_DELAY: ${RETRY_DELAY:-60s}
+      # Below the 60s first retry delay, so each wave of retries probes the webhook.
+      CIRCUIT_OPEN_WAIT: 30s
+      # Circuit profile per client. JSON, not RESILIENCE4J_..._INSTANCES_CLIENT008_... env vars:
+      # Spring lowercases map keys from env vars, and the breaker name must match the client_id.
+      SPRING_APPLICATION_JSON: '{"resilience4j":{"circuitbreaker":{"instances":{"CLIENT008":{"base-config":"bajo-volumen"}}}}}'
+      # Local webhooks run without TLS; never enable in production.
+      WEBHOOK_ALLOW_HTTP: "true"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+
+  # Simulates the platform producing transactions.events.v1. Opt-in: docker compose --profile simulator up
+  transaction-simulator:
+    build: ./transaction-simulator
+    profiles: [simulator]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SIMULATOR_EVENTS_PER_MINUTE: ${SIMULATOR_EVENTS_PER_MINUTE:-3000}
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  # Receives the webhooks of the seeded subscriptions (notificator/db/04-seed-subscriptions.sql).
+  # Its /config API has no auth: published on localhost only.
+  webhook-mock:
+    build: ./webhook-mock
+    ports:
+      - "127.0.0.1:8090:8090"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+
+  loki:
+    image: grafana/loki:3.5.0
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./observability/loki:/etc/loki:ro
+      - loki-data:/loki
+
+  # Reads container logs through the Docker socket (root-equivalent): local only, no published ports.
+  alloy:
+    image: grafana/alloy:v1.10.0
+    # Listens on all interfaces so Prometheus can scrape the Kafka exporter; not published.
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./observability/alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_started
+      # The Kafka exporter fails Alloy's initial load if the broker is not reachable yet.
+      kafka:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+
 volumes:
   mariadb-data:
   kafka-data:
+  prometheus-data:
+  loki-data:
+  grafana-data:
