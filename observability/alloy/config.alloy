@@ -1,0 +1,53 @@
+// Ships the apps' JSON stdout to Loki. Only app and level become labels;
+// client_id and event_id stay in the JSON (unbounded cardinality).
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "apps" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "manager|notificator"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "app"
+  }
+}
+
+loki.source.docker "apps" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.apps.output
+  forward_to = [loki.process.apps.receiver]
+}
+
+loki.process "apps" {
+  forward_to = [loki.write.default.receiver]
+
+  // ECS structured logging: {"log":{"level":"INFO",...},...}
+  stage.json {
+    expressions = { level = "log.level" }
+  }
+
+  stage.labels {
+    values = { level = "" }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Consumer group lag and topic offsets, read from the broker through the Admin API: unlike the
+// consumers' own metrics, the lag keeps growing when the notificator is down. Prometheus scrapes
+// it from Alloy's HTTP server (job "kafka"); the port is not published.
+prometheus.exporter.kafka "default" {
+  kafka_uris = ["kafka:9092"]
+}

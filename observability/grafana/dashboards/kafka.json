@@ -1,0 +1,126 @@
+{
+  "uid": "kafka",
+  "title": "Kafka",
+  "tags": [
+    "cobre"
+  ],
+  "schemaVersion": 41,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "timezone": "browser",
+  "editable": false,
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Lag por consumer group y partición",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (consumergroup, topic, partition) (kafka_consumergroup_uncommitted_offsets{consumergroup=~\"notificator.*\"} >= 0)",
+          "legendFormat": "{{consumergroup}} · {{topic}} p{{partition}}"
+        }
+      ],
+      "description": "Medido en el broker. Se omiten las particiones donde el grupo todavía no commiteó (Alloy las reporta como -1). El lag de los grupos de retry incluye mensajes que esperan su backoff a propósito."
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Mensajes por minuto en retry y DLT",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (topic) (rate(kafka_topic_partition_current_offset{topic=~`notificator\\.(retry\\.v1-.*|dlt\\.v1)`}[2m])) * 60",
+          "legendFormat": "{{topic}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Rebalanceos por consumer group",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (group) (label_replace(resets(kafka_consumer_coordinator_last_rebalance_seconds_ago{app=\"notificator\"}[5m]), \"group\", \"$1\", \"client_id\", \"consumer-(.+)-[0-9]+\"))",
+          "legendFormat": "{{group}}"
+        }
+      ],
+      "description": "Rebalanceos en los últimos 5 minutos. Un reinicio del notificator cuenta dos: la salida y la entrada de sus consumidores."
+    }
+  ]
+}

@@ -1,0 +1,269 @@
+apiVersion: 1
+
+# Grafana-managed alerts, locked in the UI like the dashboards. No contact point: they show up in
+# Alerting and in the General dashboard. Each query returns the value and C compares it, so the UI
+# shows what fired. No data means no traffic, not a failure: noDataState OK everywhere.
+groups:
+  - orgId: 1
+    name: plataforma
+    folder: Cobre
+    interval: 30s
+    rules:
+      - uid: app-down
+        title: App caída
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: up{app=~"manager|notificator|kafka"}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Prometheus no puede scrapear {{ $labels.app }}"
+
+      # Above the threshold and still growing: a high lag that shrinks is a notificator catching up.
+      # Only the main group: retry and DLT groups hold messages waiting for their backoff on purpose.
+      - uid: notificator-not-consuming
+        title: Notificator sin consumir
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                sum(kafka_consumergroup_uncommitted_offsets{consumergroup="notificator"} >= 0)
+                and sum(delta((kafka_consumergroup_uncommitted_offsets{consumergroup="notificator"} >= 0)[5m:30s])) > 0
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [10000] }
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Lag de transactions.events.v1 creciendo: {{ $values.A.Value }} mensajes"
+
+      - uid: persistence-errors
+        title: Errores de persistencia
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(rate(notificator_persistence_errors_total[2m]))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "El notificator no puede escribir en la base"
+
+      # exhausted is a client's webhook that never answered: not ours.
+      - uid: dlt-internal-error
+        title: DLT por error interno
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(notificator_dlt_messages_total{reason=~"invalid|unexpected"}[10m]))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: { severity: critical }
+        annotations:
+          summary: "Mensajes al DLT por motivo invalid o unexpected en los últimos 10 minutos"
+
+      - uid: replay-unavailable
+        title: Replay sin Kafka
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(manager_replay_requests_total{outcome="unavailable"}[5m]))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: { severity: critical }
+        annotations:
+          summary: "El manager respondió replays con 503: no puede publicar en Kafka"
+
+      # The replay's 503 has its own alert; a 500 on the replay still counts.
+      - uid: manager-5xx
+        title: Errores del manager
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                sum(rate(http_server_requests_seconds_count{app="manager", status=~"5..", status!="503"}[5m]))
+                / (sum(rate(http_server_requests_seconds_count{app="manager"}[5m])) > 0)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Más del 5% de los requests al manager responden 5xx"
+
+  - orgId: 1
+    name: entrega
+    folder: Cobre
+    interval: 1m
+    rules:
+      # Fraction of active clients with most of their attempts undelivered: one client down stays
+      # below it (that is the circuit alert), a bug of ours that every webhook rejects does not.
+      # Attempts, not final states: a 5xx only reaches FAILED after ~31 min of retries.
+      - uid: many-clients-failing
+        title: Muchos clientes fallando
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                count(
+                  sum by (client_id) (increase(notificator_webhook_attempts_total{outcome!="delivered"}[10m]))
+                  / sum by (client_id) (increase(notificator_webhook_attempts_total[10m])) > 0.5
+                )
+                / count(sum by (client_id) (increase(notificator_webhook_attempts_total[10m])) > 0)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.3] }
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ humanizePercentage $values.A.Value }} de los clientes activos con la mayoría de sus intentos sin entregar"
+
+      - uid: recovery-failed
+        title: Recovery cierra eventos
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(notificator_recovery_events_total{action="failed"}[15m]))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: { severity: warning }
+        annotations:
+          summary: "El job de recuperación cerró eventos como FAILED: una entrega quedó a medias"
+
+      # The breaker is named after the client. half_open counts: a webhook that stays down flips
+      # between both states every CIRCUIT_OPEN_WAIT, and open alone would reset the 5m.
+      - uid: circuit-open
+        title: Circuito abierto
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                max by (client_id) (label_replace(resilience4j_circuitbreaker_state{state=~"open|half_open"},
+                "client_id", "$1", "name", "(.*)"))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels: { severity: info }
+        annotations:
+          summary: "Circuito de {{ $labels.client_id }} abierto: su webhook no responde"

@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+
+# Actuator ports are internal to the compose network.
+scrape_configs:
+  - job_name: manager
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["manager:9291"]
+        labels: { app: manager }
+  - job_name: notificator
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["notificator:9391"]
+        labels: { app: notificator }
+  # Consumer group lag and topic offsets from the broker, exported by Alloy (see config.alloy).
+  - job_name: kafka
+    metrics_path: /api/v0/component/prometheus.exporter.kafka.default/metrics
+    static_configs:
+      - targets: ["alloy:12345"]
+        labels: { app: kafka }

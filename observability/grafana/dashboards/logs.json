@@ -1,0 +1,107 @@
+{
+  "uid": "logs",
+  "title": "Logs",
+  "tags": [
+    "cobre"
+  ],
+  "schemaVersion": 41,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "timezone": "browser",
+  "editable": false,
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "type": 1,
+          "label": "app",
+          "refId": "LokiVariableQueryEditor-VariableQuery"
+        },
+        "definition": "label_values(app)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "label": "Servicio"
+      },
+      {
+        "name": "level",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "type": 1,
+          "label": "level",
+          "refId": "LokiVariableQueryEditor-VariableQuery"
+        },
+        "definition": "label_values(level)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "label": "Nivel"
+      },
+      {
+        "name": "regex",
+        "label": "Regex",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "Logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 30
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{app=~\"$app\", level=~\"$level\"} | json | line_format `{{.log_level}} {{regexReplaceAll \".*\\\\.\" .log_logger \"\"}} {{.message | replace \"\\n\" \"\\\\n\"}}{{with .event_id}} event_id={{.}}{{end}}{{with .client_id}} client_id={{.}}{{end}}{{with .error}} error={{. | replace \"\\n\" \"\\\\n\"}}{{end}}{{with .error_stack_trace}} exception={{. | replace \"\\n\" \"\\\\n\" | replace \"\\t\" \"\\\\t\"}}{{end}}` |~ `$regex`"
+        }
+      ]
+    }
+  ]
+}
