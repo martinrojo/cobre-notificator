@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: notificator
+  datasource:
+    url: jdbc:mariadb://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+    consumer:
+      group-id: notificator
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: record
+      # One consumer thread per partition of transactions.events.v1 (10). With N pods, set
+      # KAFKA_LISTENER_CONCURRENCY so pods x concurrency covers 10; extra threads stay idle.
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:10}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+
+notificator:
+  delivery:
+    retry:
+      attempts: 4
+      delay: ${RETRY_DELAY:60s}
+      multiplier: 5
+    lease: ${DELIVERY_LEASE:120s}
+    webhook:
+      connect-timeout: ${WEBHOOK_CONNECT_TIMEOUT:250ms}
+      read-timeout: ${WEBHOOK_READ_TIMEOUT:500ms}
+      # Local only: production subscriptions must use https.
+      allow-http: ${WEBHOOK_ALLOW_HTTP:false}
+    recovery:
+      interval: ${RECOVERY_INTERVAL:60s}
+      batch-size: 100
+
+# One breaker per client_id, created on first use from this default config (no instances).
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        # A time window covers the same span at any volume. The minimum caps how long a client that
+        # times out on every call holds the partition before opening: 10 x (connect + read).
+        sliding-window-type: TIME_BASED
+        sliding-window-size: 60
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        # Must stay below notificator.delivery.retry.delay, so each wave of retries finds the
+        # circuit half-open and probes the webhook instead of being rejected.
+        wait-duration-in-open-state: ${CIRCUIT_OPEN_WAIT:30s}
+        permitted-number-of-calls-in-half-open-state: 2
+        # Safety net: a lost permit sends the breaker back to OPEN instead of waiting forever.
+        max-wait-duration-in-half-open-state: 10s
+        automatic-transition-from-open-to-half-open-enabled: false
+      # Profiles only change the window and the minimum; everything else comes from default, so
+      # none can break the wait < retry.delay rule. A client gets one from its environment with
+      # instances.<client_id>.base-config (see docker-compose.yml); unassigned clients use default.
+      bajo-volumen:
+        base-config: default
+        sliding-window-size: 300
+        minimum-number-of-calls: 5
+
+# No business HTTP endpoints: the only port serves the actuator and is not published by compose.
+server:
+  port: 9391
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    distribution:
+      # Fixed buckets let Prometheus compute p95 across instances. Few of them: the webhook
+      # latency is tagged by client_id. The default timeouts cut at 750ms (250ms + 500ms); the
+      # higher buckets only matter if WEBHOOK_*_TIMEOUT is overridden.
+      slo:
+        notificator.webhook.latency: 5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2500ms,5s,10s
+        # Up to the worst delivered case: 60s + 300s + 1500s of retries plus lease and recovery.
+        notificator.delivery.e2e: 100ms,500ms,1s,5s,10s,30s,1m,2m,5m,10m,30m,1h,2h
+
+logging:
+  level:
+    # A duplicate event is an expected primary-key violation; the driver would log each one as WARN.
+    org.mariadb.jdbc.message.server.ErrorPacket: error
+  structured:
+    format:
+      console: ecs
