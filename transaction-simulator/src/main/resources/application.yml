@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: transaction-simulator
+  main:
+    web-application-type: none
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        # Bounds how long send() blocks a client thread on metadata/buffer when Kafka is down.
+        max.block.ms: 1000
+
+simulator:
+  topic: transactions.events.v1
+  events-per-minute: ${SIMULATOR_EVENTS_PER_MINUTE:3000}
+  clients: 8
+
+logging:
+  structured:
+    format:
+      console: ecs
