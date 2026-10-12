@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: webhook-mock
+  threads:
+    virtual:
+      # Each configured delay sleeps its request thread; virtual threads keep hundreds in flight cheap.
+      enabled: true
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+server:
+  port: 8090
+
+logging:
+  structured:
+    format:
+      console: ecs

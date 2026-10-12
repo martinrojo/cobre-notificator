@@ -1,0 +1,434 @@
+{
+  "info": {
+    "name": "manager",
+    "description": "API self-service del manager. X-Client-Id identifica al cliente solo en desarrollo; el diseño propuesto lo toma del JWT. Las requests de listado guardan notificationEventId (primer resultado) y cursor (página siguiente).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9290"
+    },
+    {
+      "key": "clientId",
+      "value": "CLIENT002"
+    },
+    {
+      "key": "otherClientId",
+      "value": "CLIENT001"
+    },
+    {
+      "key": "notificationEventId",
+      "value": ""
+    },
+    {
+      "key": "cursor",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Listado",
+      "item": [
+        {
+          "name": "Listar (página de 2)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?size=2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "2"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('cursor', body.next_cursor || '');",
+                  "if (body.data && body.data.length) {",
+                  "  pm.collectionVariables.set('notificationEventId', body.data[0].notification_event_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Página siguiente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?size=2&cursor={{cursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "2"
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{cursor}}"
+                }
+              ]
+            },
+            "description": "Repetir con los mismos filtros que la página anterior; en la última, next_cursor es null."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('cursor', body.next_cursor || '');",
+                  "if (body.data && body.data.length) {",
+                  "  pm.collectionVariables.set('notificationEventId', body.data[0].notification_event_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar FAILED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?delivery_status=FAILED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "delivery_status",
+                  "value": "FAILED"
+                }
+              ]
+            },
+            "description": "Guarda el primer FAILED en notificationEventId, listo para el replay."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('cursor', body.next_cursor || '');",
+                  "if (body.data && body.data.length) {",
+                  "  pm.collectionVariables.set('notificationEventId', body.data[0].notification_event_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar DELIVERED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?delivery_status=DELIVERED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "delivery_status",
+                  "value": "DELIVERED"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('cursor', body.next_cursor || '');",
+                  "if (body.data && body.data.length) {",
+                  "  pm.collectionVariables.set('notificationEventId', body.data[0].notification_event_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar por rango de fechas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?from=2024-03-15T00:00:00Z&to=2024-03-16T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2024-03-15T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2024-03-16T00:00:00Z"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('cursor', body.next_cursor || '');",
+                  "if (body.data && body.data.length) {",
+                  "  pm.collectionVariables.set('notificationEventId', body.data[0].notification_event_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Detalle",
+      "item": [
+        {
+          "name": "Obtener por id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/{{notificationEventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "{{notificationEventId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replay",
+      "item": [
+        {
+          "name": "Replay (202)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/{{notificationEventId}}/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "{{notificationEventId}}",
+                "replay"
+              ]
+            },
+            "description": "Correr antes 'Listar FAILED'. 202 también si ya hay un replay en curso."
+          }
+        },
+        {
+          "name": "Replay de un evento no FAILED (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/{{notificationEventId}}/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "{{notificationEventId}}",
+                "replay"
+              ]
+            },
+            "description": "Correr antes 'Listar DELIVERED'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Errores",
+      "item": [
+        {
+          "name": "Sin X-Client-Id (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ]
+            }
+          }
+        },
+        {
+          "name": "size inválido (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?size=abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "abc"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Fecha inválida (400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?from=ayer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "ayer"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Evento de otro cliente (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{otherClientId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/{{notificationEventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "{{notificationEventId}}"
+              ]
+            },
+            "description": "El id guardado es de clientId; otro cliente no lo ve."
+          }
+        }
+      ]
+    }
+  ]
+}
