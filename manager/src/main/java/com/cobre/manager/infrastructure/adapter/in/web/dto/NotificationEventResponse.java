@@ -5,6 +5,7 @@ import com.cobre.manager.domain.model.NotificationEvent;
 import java.time.Instant;
 
 public record NotificationEventResponse(
+    String notificationEventId,
     String eventId,
     String eventType,
     String content,
@@ -14,6 +15,7 @@ public record NotificationEventResponse(
 
   public static NotificationEventResponse from(NotificationEvent event) {
     return new NotificationEventResponse(
+        event.id(),
         event.eventId(),
         event.eventType(),
         event.content(),

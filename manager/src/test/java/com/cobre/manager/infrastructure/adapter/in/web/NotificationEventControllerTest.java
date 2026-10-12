@@ -12,16 +12,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.cobre.manager.domain.exception.InvalidParameterException;
 import com.cobre.manager.domain.exception.NotificationEventNotFoundException;
 import com.cobre.manager.domain.exception.ReplayNotAllowedException;
 import com.cobre.manager.domain.exception.ReplayPublishException;
 import com.cobre.manager.domain.model.DeliveryStatus;
 import com.cobre.manager.domain.model.NotificationEvent;
 import com.cobre.manager.domain.model.NotificationEventFilter;
+import com.cobre.manager.domain.model.NotificationEventPage;
+import com.cobre.manager.domain.model.PageCursor;
 import com.cobre.manager.domain.port.in.GetNotificationEventUseCase;
 import com.cobre.manager.domain.port.in.ListNotificationEventsUseCase;
 import com.cobre.manager.domain.port.in.ReplayNotificationEventUseCase;
 import com.cobre.manager.infrastructure.adapter.in.web.security.ClientContext;
+import com.jayway.jsonpath.JsonPath;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -30,13 +34,16 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(NotificationEventController.class)
-@Import(ClientContext.class)
+@Import({ClientContext.class, CursorCodec.class})
 class NotificationEventControllerTest {
 
   private static final String CLIENT_HEADER = "X-Client-Id";
+
+  private static final String ID = "01a1311c-4907-7a3c-9814-0adb01ff9e75";
 
   @Autowired private MockMvc mockMvc;
 
@@ -48,10 +55,11 @@ class NotificationEventControllerTest {
 
   @Test
   void returnsEventsInSnakeCase() throws Exception {
-    when(listNotificationEvents.list(any()))
+    when(listNotificationEvents.list(any(), any(), any()))
         .thenReturn(
-            List.of(
+            page(
                 new NotificationEvent(
+                    "01a1311c-4907-792c-a433-4e7984227e77",
                     "EVT001",
                     "CLIENT001",
                     "credit_card_payment",
@@ -59,32 +67,102 @@ class NotificationEventControllerTest {
                     DeliveryStatus.DELIVERED,
                     Instant.parse("2024-03-15T09:30:22Z"),
                     Instant.parse("2024-03-15T09:30:22Z"),
-                    null)));
+                    null,
+                    0)));
 
     mockMvc
         .perform(get("/notification_events").header(CLIENT_HEADER, "CLIENT001"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].event_id").value("EVT001"))
-        .andExpect(jsonPath("$[0].event_type").value("credit_card_payment"))
-        .andExpect(jsonPath("$[0].delivery_status").value("DELIVERED"))
-        .andExpect(jsonPath("$[0].created_at").value("2024-03-15T09:30:22Z"))
-        .andExpect(jsonPath("$[0].delivery_date").value("2024-03-15T09:30:22Z"))
-        .andExpect(jsonPath("$[0].client_id").doesNotExist());
+        .andExpect(
+            jsonPath("$.data[0].notification_event_id")
+                .value("01a1311c-4907-792c-a433-4e7984227e77"))
+        .andExpect(jsonPath("$.data[0].event_id").value("EVT001"))
+        .andExpect(jsonPath("$.data[0].event_type").value("credit_card_payment"))
+        .andExpect(jsonPath("$.data[0].delivery_status").value("DELIVERED"))
+        .andExpect(jsonPath("$.data[0].created_at").value("2024-03-15T09:30:22Z"))
+        .andExpect(jsonPath("$.data[0].delivery_date").value("2024-03-15T09:30:22Z"))
+        .andExpect(jsonPath("$.data[0].client_id").doesNotExist());
   }
 
   @Test
-  void returnsEmptyList() throws Exception {
-    when(listNotificationEvents.list(any())).thenReturn(List.of());
+  void returnsEmptyPageWithExplicitNullCursor() throws Exception {
+    when(listNotificationEvents.list(any(), any(), any())).thenReturn(page());
 
     mockMvc
         .perform(get("/notification_events").header(CLIENT_HEADER, "CLIENT999"))
         .andExpect(status().isOk())
-        .andExpect(content().json("[]"));
+        .andExpect(content().json("{\"data\":[],\"next_cursor\":null}", JsonCompareMode.STRICT));
+  }
+
+  @Test
+  void nextCursorIsAcceptedOnTheFollowingRequest() throws Exception {
+    var filter = new NotificationEventFilter("CLIENT001", null, null, DeliveryStatus.FAILED);
+    var next = new PageCursor(Instant.parse("2024-03-15T09:30:22.5Z"), ID, filter);
+    when(listNotificationEvents.list(filter, null, 2))
+        .thenReturn(new NotificationEventPage(List.of(), next));
+
+    String body =
+        mockMvc
+            .perform(
+                get("/notification_events")
+                    .header(CLIENT_HEADER, "CLIENT001")
+                    .param("delivery_status", "FAILED")
+                    .param("size", "2"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String token = JsonPath.read(body, "$.next_cursor");
+
+    when(listNotificationEvents.list(filter, next, 5)).thenReturn(page());
+    mockMvc
+        .perform(
+            get("/notification_events")
+                .header(CLIENT_HEADER, "CLIENT001")
+                .param("delivery_status", "FAILED")
+                .param("size", "5")
+                .param("cursor", token))
+        .andExpect(status().isOk());
+    verify(listNotificationEvents).list(filter, next, 5);
+  }
+
+  @Test
+  void rejectsSizeOutOfRange() throws Exception {
+    when(listNotificationEvents.list(any(), any(), any()))
+        .thenThrow(InvalidParameterException.invalidSize(100));
+
+    mockMvc
+        .perform(
+            get("/notification_events").header(CLIENT_HEADER, "CLIENT001").param("size", "101"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.detail").value("'size' must be between 1 and 100"));
+  }
+
+  @Test
+  void rejectsNonNumericSize() throws Exception {
+    mockMvc
+        .perform(
+            get("/notification_events").header(CLIENT_HEADER, "CLIENT001").param("size", "abc"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.detail").value("'size' must be an integer"));
+    verify(listNotificationEvents, never()).list(any(), any(), any());
+  }
+
+  @Test
+  void rejectsMalformedCursor() throws Exception {
+    mockMvc
+        .perform(
+            get("/notification_events")
+                .header(CLIENT_HEADER, "CLIENT001")
+                .param("cursor", "not-a-cursor"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.detail").value("'cursor' is invalid"));
+    verify(listNotificationEvents, never()).list(any(), any(), any());
   }
 
   @Test
   void passesHeaderClientIdAndFiltersToUseCase() throws Exception {
-    when(listNotificationEvents.list(any())).thenReturn(List.of());
+    when(listNotificationEvents.list(any(), any(), any())).thenReturn(page());
 
     mockMvc
         .perform(
@@ -101,7 +179,9 @@ class NotificationEventControllerTest {
                 "CLIENT001",
                 Instant.parse("2024-03-15T10:00:00Z"),
                 Instant.parse("2024-03-15T16:00:00Z"),
-                DeliveryStatus.DELIVERED));
+                DeliveryStatus.DELIVERED),
+            null,
+            null);
   }
 
   @Test
@@ -111,7 +191,7 @@ class NotificationEventControllerTest {
         .andExpect(status().isUnauthorized())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
         .andExpect(jsonPath("$.detail").value("Client identification is missing"));
-    verify(listNotificationEvents, never()).list(any());
+    verify(listNotificationEvents, never()).list(any(), any(), any());
   }
 
   @Test
@@ -176,9 +256,10 @@ class NotificationEventControllerTest {
 
   @Test
   void getsEventByIdForHeaderClient() throws Exception {
-    when(getNotificationEvent.get("CLIENT002", "EVT003"))
+    when(getNotificationEvent.get("CLIENT002", ID))
         .thenReturn(
             new NotificationEvent(
+                ID,
                 "EVT003",
                 "CLIENT002",
                 "credit_transfer",
@@ -186,16 +267,18 @@ class NotificationEventControllerTest {
                 DeliveryStatus.FAILED,
                 Instant.parse("2024-03-15T11:20:18Z"),
                 Instant.parse("2024-03-15T11:20:18Z"),
-                null));
+                null,
+                0));
 
     mockMvc
-        .perform(get("/notification_events/EVT003").header(CLIENT_HEADER, "CLIENT002"))
+        .perform(get("/notification_events/" + ID).header(CLIENT_HEADER, "CLIENT002"))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.notification_event_id").value(ID))
         .andExpect(jsonPath("$.event_id").value("EVT003"))
         .andExpect(jsonPath("$.delivery_status").value("FAILED"))
         .andExpect(jsonPath("$.created_at").value("2024-03-15T11:20:18Z"))
         .andExpect(jsonPath("$.client_id").doesNotExist());
-    verify(getNotificationEvent).get("CLIENT002", "EVT003");
+    verify(getNotificationEvent).get("CLIENT002", ID);
   }
 
   @Test
@@ -275,5 +358,9 @@ class NotificationEventControllerTest {
         .perform(post("/notification_events/EVT003/replay"))
         .andExpect(status().isUnauthorized());
     verify(replayNotificationEvent, never()).replay(any(), any());
+  }
+
+  private static NotificationEventPage page(NotificationEvent... events) {
+    return new NotificationEventPage(List.of(events), null);
   }
 }

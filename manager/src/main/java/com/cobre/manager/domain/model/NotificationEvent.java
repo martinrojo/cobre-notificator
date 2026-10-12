@@ -3,6 +3,7 @@ package com.cobre.manager.domain.model;
 import java.time.Instant;
 
 public record NotificationEvent(
+    String id,
     String eventId,
     String clientId,
     String eventType,
@@ -10,7 +11,8 @@ public record NotificationEvent(
     DeliveryStatus deliveryStatus,
     Instant createdAt,
     Instant deliveryDate,
-    Instant lastReplayAt) {
+    Instant lastReplayAt,
+    int generation) {
 
   /** A replay already taken by the notificator is in progress; asking again has no effect. */
   public ReplayDecision replayDecision() {

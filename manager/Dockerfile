@@ -11,4 +11,4 @@ USER app
 WORKDIR /app
 COPY --from=build /build/target/app.jar app.jar
 EXPOSE 9290
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-Xms2g", "-Xmx2g", "-jar", "/app/app.jar"]

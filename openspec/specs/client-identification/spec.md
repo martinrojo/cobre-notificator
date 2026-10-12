@@ -34,8 +34,8 @@ Un request a una ruta no pública SHALL responder HTTP 401 si el header `X-Clien
 - **THEN** la respuesta es HTTP 401, no 404
 
 ### Requirement: Rutas públicas
-Solo las rutas públicas explícitamente listadas SHALL responder sin requerir `X-Client-Id`. Hoy la única es `GET /ping`; cualquier ruta nueva queda protegida por defecto.
+Solo las rutas públicas explícitamente listadas SHALL responder sin requerir `X-Client-Id`. Hoy no hay ninguna; cualquier ruta nueva queda protegida por defecto. Los endpoints de actuator se sirven en el puerto de management, que no se publica, y no pasan por esta identificación.
 
-#### Scenario: Ping sin cliente
+#### Scenario: Ping eliminado
 - **WHEN** se hace `GET /ping` sin el header `X-Client-Id`
-- **THEN** la respuesta es HTTP 200 con cuerpo `pong`
+- **THEN** la respuesta es HTTP 401

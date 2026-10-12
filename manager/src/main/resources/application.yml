@@ -26,6 +26,9 @@ manager:
     topic: notifications.replay-requested.v1
     publish-timeout: ${REPLAY_PUBLISH_TIMEOUT:3s}
     retry-after: ${REPLAY_RETRY_AFTER:5s}
+  query:
+    default-page-size: ${QUERY_DEFAULT_PAGE_SIZE:20}
+    max-page-size: ${QUERY_MAX_PAGE_SIZE:100}
 
 server:
   port: 9290

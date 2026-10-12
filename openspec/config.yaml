@@ -53,7 +53,7 @@ context: |
   - GET /notification_events/{notification_event_id}: 404 si no existe o si
     pertenece a otro cliente (no distinguir ambos casos).
   - POST /notification_events/{notification_event_id}/replay: FAILED -> publica ReplayRequested
-    (event_id, client_id, requested_at) en notifications.replay-requested.v1 y
+    (event_id, client_id, generation, requested_at) en notifications.replay-requested.v1 y
     responde 202 solo con el ack de Kafka (falla o timeout -> 503 con Retry-After).
     PENDING/RETRYING con last_replay_at no nulo (replay en curso) -> 202 sin publicar.
     Otro estado -> 409; no existe o es de otro cliente -> 404. El manager no
@@ -70,15 +70,46 @@ context: |
     @RetryableTopic con un RetryTopicNamesProviderFactory propio que devuelve
     notificator.retry.v1-<n> y notificator.dlt.v1 (los sufijos derivan del
     tópico principal y no sirven), y autoCreateTopics="false".
-  - Key de los mensajes: client_id.
-  - Idempotente por event_id: un evento en estado final no se reentrega, salvo
-    replay de un FAILED (transición condicional en DB para descartar replays duplicados).
+  - Key de los mensajes: client_id en transactions.events.v1, event_id en
+    notifications.replay-requested.v1; retry y DLT conservan la key de origen.
+  - Identidad de notification_event: PK id UUID DEFAULT UUID_v7(), generado
+    por la base y expuesto como notification_event_id (path del manager, cuerpo
+    y header X-Notification-Event-Id del webhook). event_id es del productor y
+    solo es único por cliente: UNIQUE (client_id, event_id). El notificator
+    identifica la fila siempre por (client_id, event_id), nunca por event_id
+    solo; el manager busca por id AND client_id.
+  - Idempotente por (client_id, event_id) con claim antes de cada POST: el
+    intento 1 hace INSERT ... RETURNING id (duplicado = descarte) y el intento n hace UPDATE
+    attempts=n WHERE attempts=n-1 AND status IN (PENDING, RETRYING). attempts
+    cuenta intentos iniciados de la generación y no baja dentro de ella.
+    (generation, attempts) es el fencing token: todo UPDATE lleva
+    generation = :generation (0 filas = descartar sin excepción). DELIVERED gana
+    siempre sobre un estado no final de la misma generación.
+  - Un FAILED solo se reabre por replay: UPDATE generation = generation + 1,
+    attempts = 1, PENDING WHERE FAILED AND client_id y generation del pedido.
+    La generación de un mensaje sale del valor: transactions.events.v1 = 0, un
+    pedido de replay con generation g (y sus retries/DLT) = g + 1.
+  - El intento sale del tópico (principal y replay = 1, retry.v1-i = i+2); en el DLT,
+    del header retry_topic-attempts - 1. Los datos de la entrega salen de la
+    fila, nunca del mensaje.
+  - Errores transitorios de DB: reintento bloqueante en el mismo offset
+    (backoff exponencial hasta 30 s, sin límite); nunca van a retry ni al DLT.
+  - Job de recuperación (cada 60 s, en cada instancia, sin lock): las filas
+    PENDING/RETRYING sin cambios por más de delay(attempts) + lease se
+    republican en retry.v1-(attempts-1) sin tocar attempts, tras un CAS sobre
+    updated_at con el tiempo de la DB; con attempts=4 pasan a FAILED.
   - Reintentos no bloqueantes con @RetryableTopic: delay 60s, multiplier 5,
     attempts 4 (1 intento inicial + 3 reintentos a los 60s, 300s y 1500s).
   - Se reintenta solo: timeout, error de conexión, HTTP 408, 429 y 5xx. El resto
     de errores no se reintenta.
   - La URL del webhook se resuelve desde subscription en cada intento.
-  - Handler del DLT: consume el evento y lo marca FAILED.
+  - Circuit breaker de Resilience4j (resilience4j-spring-boot4) sobre la llamada
+    al webhook: un breaker por client_id (registry.circuitBreaker(clientId)),
+    nunca uno global ni vía anotación. Breaker abierto = error retryable. Solo
+    cuentan como fallo las señales de cliente no disponible: timeout, error de
+    conexión, 429, 502, 503 y 504 (500, 408 y el resto se reintentan pero no
+    abren el circuito).
+  - Handler del DLT: marca FAILED solo si generation y attempts siguen en el intento fallido.
 
   ## Convenciones Java
   - Todo proyecto Java (pom.xml) incluye com.spotify.fmt:fmt-maven-plugin

@@ -14,7 +14,11 @@ class NotificationEventsRequestTest {
   void mapsToFilter() {
     var filter =
         new NotificationEventsRequest(
-                "2024-03-15T10:00:00Z", "2024-03-15T18:00:00+02:00", DeliveryStatus.FAILED)
+                "2024-03-15T10:00:00Z",
+                "2024-03-15T18:00:00+02:00",
+                DeliveryStatus.FAILED,
+                null,
+                null)
             .toFilter("CLIENT001");
 
     assertThat(filter.clientId()).isEqualTo("CLIENT001");
@@ -25,7 +29,7 @@ class NotificationEventsRequestTest {
 
   @Test
   void nullParamsMeanNoFilter() {
-    var filter = new NotificationEventsRequest(null, null, null).toFilter("CLIENT001");
+    var filter = new NotificationEventsRequest(null, null, null, null, null).toFilter("CLIENT001");
 
     assertThat(filter.from()).isNull();
     assertThat(filter.to()).isNull();
@@ -35,7 +39,9 @@ class NotificationEventsRequestTest {
   @Test
   void rejectsMalformedDate() {
     assertThatThrownBy(
-            () -> new NotificationEventsRequest("15-03-2024", null, null).toFilter("CLIENT001"))
+            () ->
+                new NotificationEventsRequest("15-03-2024", null, null, null, null)
+                    .toFilter("CLIENT001"))
         .isInstanceOf(InvalidParameterException.class)
         .hasMessageStartingWith("'from' must be an ISO-8601");
   }
@@ -44,9 +50,29 @@ class NotificationEventsRequestTest {
   void rejectsDateWithoutOffset() {
     assertThatThrownBy(
             () ->
-                new NotificationEventsRequest(null, "2024-03-15T10:00:00", null)
+                new NotificationEventsRequest(null, "2024-03-15T10:00:00", null, null, null)
                     .toFilter("CLIENT001"))
         .isInstanceOf(InvalidParameterException.class)
         .hasMessageStartingWith("'to' must be an ISO-8601");
+  }
+
+  @Test
+  void parsesSize() {
+    assertThat(new NotificationEventsRequest(null, null, null, " 5 ", null).pageSize())
+        .isEqualTo(5);
+  }
+
+  @Test
+  void missingOrBlankSizeMeansDefault() {
+    assertThat(new NotificationEventsRequest(null, null, null, null, null).pageSize()).isNull();
+    assertThat(new NotificationEventsRequest(null, null, null, " ", null).pageSize()).isNull();
+  }
+
+  @Test
+  void rejectsNonNumericSize() {
+    assertThatThrownBy(
+            () -> new NotificationEventsRequest(null, null, null, "abc", null).pageSize())
+        .isInstanceOf(InvalidParameterException.class)
+        .hasMessage("'size' must be an integer");
   }
 }

@@ -4,5 +4,5 @@ import com.cobre.manager.domain.model.NotificationEvent;
 
 public interface GetNotificationEventUseCase {
 
-  NotificationEvent get(String clientId, String eventId);
+  NotificationEvent get(String clientId, String id);
 }

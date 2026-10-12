@@ -24,7 +24,7 @@ class KafkaReplayRequestPublisherTest {
 
   private static final String TOPIC = "notifications.replay-requested.v1";
   private static final ReplayRequested REQUEST =
-      new ReplayRequested("EVT003", "CLIENT002", Instant.parse("2026-10-10T12:00:00.123Z"));
+      new ReplayRequested("EVT003", "CLIENT002", 0, Instant.parse("2026-10-10T12:00:00.123Z"));
 
   @SuppressWarnings("unchecked")
   private final KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
@@ -41,7 +41,7 @@ class KafkaReplayRequestPublisherTest {
   }
 
   @Test
-  void sendsJsonKeyedByClientId() {
+  void sendsJsonKeyedByEventId() {
     when(kafkaTemplate.send(anyString(), anyString(), anyString()))
         .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
 
@@ -50,8 +50,8 @@ class KafkaReplayRequestPublisherTest {
     verify(kafkaTemplate)
         .send(
             TOPIC,
-            "CLIENT002",
-            "{\"event_id\":\"EVT003\",\"client_id\":\"CLIENT002\","
+            "EVT003",
+            "{\"event_id\":\"EVT003\",\"client_id\":\"CLIENT002\",\"generation\":0,"
                 + "\"requested_at\":\"2026-10-10T12:00:00.123Z\"}");
   }
 
@@ -75,6 +75,15 @@ class KafkaReplayRequestPublisherTest {
   void sendBlockedOnMetadataIsPublishException() {
     when(kafkaTemplate.send(anyString(), anyString(), anyString()))
         .thenThrow(new KafkaException("Send failed"));
+
+    assertThatThrownBy(() -> publisher.publish(REQUEST)).isInstanceOf(ReplayPublishException.class);
+  }
+
+  @Test
+  void producerThatCannotBeCreatedIsPublishException() {
+    when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+        .thenThrow(
+            new org.apache.kafka.common.KafkaException("Failed to construct kafka producer"));
 
     assertThatThrownBy(() -> publisher.publish(REQUEST)).isInstanceOf(ReplayPublishException.class);
   }

@@ -36,13 +36,17 @@ public class KafkaReplayRequestPublisher implements ReplayRequestPublisher {
     String payload = jsonMapper.writeValueAsString(request);
     try {
       kafkaTemplate
-          .send(properties.topic(), request.clientId(), payload)
+          .send(properties.topic(), request.eventId(), payload)
           .get(properties.publishTimeout().toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw ReplayPublishException.of(request.eventId(), e);
-    } catch (ExecutionException | TimeoutException | KafkaException e) {
-      // KafkaException: send() gave up after max.block.ms waiting for metadata.
+    } catch (ExecutionException
+        | TimeoutException
+        | KafkaException
+        | org.apache.kafka.common.KafkaException e) {
+      // Spring's KafkaException: send() gave up after max.block.ms waiting for metadata. Kafka's:
+      // the producer could not be created, e.g. the bootstrap host does not resolve.
       throw ReplayPublishException.of(request.eventId(), e);
     }
   }

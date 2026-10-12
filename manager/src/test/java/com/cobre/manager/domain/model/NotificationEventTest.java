@@ -25,6 +25,7 @@ class NotificationEventTest {
       DeliveryStatus status, boolean replayed, ReplayDecision expected) {
     var event =
         new NotificationEvent(
+            "id-EVT001",
             "EVT001",
             "CLIENT001",
             "credit_card_payment",
@@ -32,7 +33,8 @@ class NotificationEventTest {
             status,
             Instant.parse("2024-03-15T09:30:22Z"),
             null,
-            replayed ? Instant.parse("2026-10-10T12:00:00Z") : null);
+            replayed ? Instant.parse("2026-10-10T12:00:00Z") : null,
+            0);
 
     assertThat(event.replayDecision()).isEqualTo(expected);
   }

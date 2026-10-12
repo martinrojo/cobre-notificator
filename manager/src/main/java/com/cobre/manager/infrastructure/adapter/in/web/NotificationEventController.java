@@ -1,12 +1,13 @@
 package com.cobre.manager.infrastructure.adapter.in.web;
 
+import com.cobre.manager.domain.model.NotificationEventPage;
 import com.cobre.manager.domain.port.in.GetNotificationEventUseCase;
 import com.cobre.manager.domain.port.in.ListNotificationEventsUseCase;
 import com.cobre.manager.domain.port.in.ReplayNotificationEventUseCase;
+import com.cobre.manager.infrastructure.adapter.in.web.dto.NotificationEventPageResponse;
 import com.cobre.manager.infrastructure.adapter.in.web.dto.NotificationEventResponse;
 import com.cobre.manager.infrastructure.adapter.in.web.dto.NotificationEventsRequest;
 import com.cobre.manager.infrastructure.adapter.in.web.security.ClientContext;
-import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,35 +23,42 @@ public class NotificationEventController {
   private final GetNotificationEventUseCase getNotificationEvent;
   private final ReplayNotificationEventUseCase replayNotificationEvent;
   private final ClientContext clientContext;
+  private final CursorCodec cursorCodec;
 
   public NotificationEventController(
       ListNotificationEventsUseCase listNotificationEvents,
       GetNotificationEventUseCase getNotificationEvent,
       ReplayNotificationEventUseCase replayNotificationEvent,
-      ClientContext clientContext) {
+      ClientContext clientContext,
+      CursorCodec cursorCodec) {
     this.listNotificationEvents = listNotificationEvents;
     this.getNotificationEvent = getNotificationEvent;
     this.replayNotificationEvent = replayNotificationEvent;
     this.clientContext = clientContext;
+    this.cursorCodec = cursorCodec;
   }
 
   @GetMapping
-  public List<NotificationEventResponse> list(NotificationEventsRequest request) {
-    return listNotificationEvents.list(request.toFilter(clientContext.clientId())).stream()
-        .map(NotificationEventResponse::from)
-        .toList();
+  public NotificationEventPageResponse list(NotificationEventsRequest request) {
+    NotificationEventPage page =
+        listNotificationEvents.list(
+            request.toFilter(clientContext.clientId()),
+            cursorCodec.decode(request.cursor()),
+            request.pageSize());
+    return new NotificationEventPageResponse(
+        page.events().stream().map(NotificationEventResponse::from).toList(),
+        cursorCodec.encode(page.next()));
   }
 
   @GetMapping("/{notification_event_id}")
-  public NotificationEventResponse get(@PathVariable("notification_event_id") String eventId) {
-    return NotificationEventResponse.from(
-        getNotificationEvent.get(clientContext.clientId(), eventId));
+  public NotificationEventResponse get(@PathVariable("notification_event_id") String id) {
+    return NotificationEventResponse.from(getNotificationEvent.get(clientContext.clientId(), id));
   }
 
   /** 202 both when the replay is published and when one is already in progress. */
   @PostMapping("/{notification_event_id}/replay")
-  public ResponseEntity<Void> replay(@PathVariable("notification_event_id") String eventId) {
-    replayNotificationEvent.replay(clientContext.clientId(), eventId);
+  public ResponseEntity<Void> replay(@PathVariable("notification_event_id") String id) {
+    replayNotificationEvent.replay(clientContext.clientId(), id);
     return ResponseEntity.accepted().build();
   }
 }
