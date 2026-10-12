@@ -69,16 +69,6 @@ class ClientIdentificationFilterTest {
     verify(chain, never()).doFilter(any(), any());
   }
 
-  @Test
-  void skipsPublicPaths() throws Exception {
-    var request = request("/ping");
-
-    filter.doFilter(request, response, chain);
-
-    verify(chain).doFilter(request, response);
-    verifyNoInteractions(resolver);
-  }
-
   private static MockHttpServletRequest request(String uri) {
     return new MockHttpServletRequest("GET", uri);
   }

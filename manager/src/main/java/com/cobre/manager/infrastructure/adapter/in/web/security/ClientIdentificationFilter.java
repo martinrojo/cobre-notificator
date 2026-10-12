@@ -20,7 +20,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 public class ClientIdentificationFilter extends OncePerRequestFilter {
 
   static final String CLIENT_ID_HEADER = "X-Client-Id";
-  static final Set<String> PUBLIC_PATHS = Set.of("/ping");
+  static final Set<String> PUBLIC_PATHS = Set.of();
   private static final String MDC_CLIENT_ID = "client_id";
 
   private final ClientContext clientContext;
